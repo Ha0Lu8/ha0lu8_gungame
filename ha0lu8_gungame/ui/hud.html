@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%; overflow: hidden; background: transparent;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Yu Gothic UI", Meiryo, Roboto, sans-serif;
+    color: #fff; user-select: none;
+  }
+  #hud { position: absolute; inset: 0; pointer-events: none; }
+  .hidden { display: none !important; }
+
+  #scorebar { position: absolute; top: 3%; left: 0; right: 0; text-align: center; text-shadow: 0 2px 6px rgba(0,0,0,.95); }
+  #sb-label { font-size: 20px; font-weight: 700; letter-spacing: 1px; opacity: .92; }
+  #sb-score { font-size: 56px; font-weight: 900; margin-top: 2px; }
+  #sb-score .t1 { color: #3b82f6; }
+  #sb-score .t2 { color: #ef4444; }
+  #sb-score .sep { margin: 0 16px; }
+  #ffaList { margin-top: 6px; font-size: 21px; font-weight: 700; }
+  #ffaList .row { margin: 2px 0; text-shadow: 0 2px 6px rgba(0,0,0,.95); }
+
+  #countdown { position: absolute; top: 32%; left: 0; right: 0; text-align: center; }
+  #cd-info { font-size: 24px; font-weight: 700; text-shadow: 0 2px 8px #000; margin-bottom: 4px; }
+  #cd-team { font-size: 30px; font-weight: 900; text-shadow: 0 2px 10px #000; margin-bottom: 6px; }
+  #cd-num { font-size: 120px; font-weight: 900; color: #f59e0b; text-shadow: 0 4px 16px rgba(0,0,0,.9); line-height: 1; }
+
+  #spectate { position: absolute; top: 52%; left: 0; right: 0; text-align: center;
+    font-size: 26px; font-weight: 700; color: #f59e0b; text-shadow: 0 2px 8px #000; }
+
+  #zone { position: absolute; top: 20%; left: 0; right: 0; text-align: center;
+    font-size: 30px; font-weight: 900; color: #ef4444; text-shadow: 0 2px 10px #000;
+    animation: zoneBlink 1s steps(2, start) infinite; }
+  @keyframes zoneBlink { 50% { opacity: .35; } }
+
+  #result { position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; background: rgba(0,0,0,.45); }
+  #rs-big { font-size: 150px; font-weight: 900; letter-spacing: 8px; line-height: 1;
+    animation: pop .4s ease-out; text-shadow: 0 6px 30px rgba(0,0,0,.85); }
+  #result.win  #rs-big { color: #22c55e; }
+  #result.loss #rs-big { color: #ef4444; }
+  #result.draw #rs-big { color: #f59e0b; }
+  #rs-jp { font-size: 40px; font-weight: 900; margin-top: 4px; text-shadow: 0 2px 10px #000; }
+  #rs-stats { margin-top: 18px; font-size: 24px; font-weight: 700; text-shadow: 0 2px 8px #000; }
+  #rs-pot { margin-top: 10px; font-size: 28px; font-weight: 900; color: #f59e0b; text-shadow: 0 2px 8px #000; }
+  #rs-back { margin-top: 26px; font-size: 20px; opacity: .8; text-shadow: 0 2px 8px #000; }
+  @keyframes pop { from { transform: scale(.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+</style>
+</head>
+<body>
+<div id="hud">
+  <div id="scorebar" class="hidden">
+    <div id="sb-label"></div>
+    <div id="sb-score"></div>
+    <div id="ffaList"></div>
+  </div>
+  <div id="countdown" class="hidden">
+    <div id="cd-info"></div>
+    <div id="cd-team"></div>
+    <div id="cd-num"></div>
+  </div>
+  <div id="spectate" class="hidden">次ラウンドを待っています</div>
+  <div id="zone" class="hidden">⚠ エリア外 — 戻れ！</div>
+  <div id="result" class="hidden">
+    <div id="rs-big"></div>
+    <div id="rs-jp"></div>
+    <div id="rs-stats"></div>
+    <div id="rs-pot" class="hidden"></div>
+    <div id="rs-back"></div>
+  </div>
+</div>
+<script>
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  function show(el, on) { el.classList.toggle("hidden", !on); }
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  function renderState(d) {
+    var sb = $("scorebar");
+    if (!d) { show(sb, false); return; }
+    show(sb, true);
+    var label = d.winType === "rounds" ? ("ラウンド " + (d.round || 1)) : "キル先取";
+    $("sb-label").textContent = label + "  (目標 " + (d.winValue || 0) + ")";
+    if (d.ffa) {
+      $("sb-score").classList.add("hidden");
+      $("sb-score").innerHTML = "";
+      var rows = (d.scores || []).slice(0, 5).map(function (s, i) {
+        return '<div class="row">' + (i + 1) + ". " + esc(s.name) + " " + (s.alive ? "" : "💀") + " — " + (s.kills || 0) + "</div>";
+      }).join("");
+      $("ffaList").innerHTML = rows;
+    } else {
+      $("ffaList").innerHTML = "";
+      $("sb-score").classList.remove("hidden");
+      var a = d.winType === "rounds" ? (d.teamRoundWins ? d.teamRoundWins.t1 : 0) : (d.teamKills ? d.teamKills.t1 : 0);
+      var b = d.winType === "rounds" ? (d.teamRoundWins ? d.teamRoundWins.t2 : 0) : (d.teamKills ? d.teamKills.t2 : 0);
+      $("sb-score").innerHTML = '<span class="t1">' + (a || 0) + '</span><span class="sep">:</span><span class="t2">' + (b || 0) + '</span>';
+    }
+  }
+
+  var resultTimer = null;
+
+  function clearAll() {
+    show($("scorebar"), false);
+    show($("countdown"), false);
+    show($("spectate"), false);
+    show($("result"), false);
+    show($("zone"), false);
+    $("ffaList").innerHTML = "";
+  }
+
+  function handle(d) {
+    switch (d.action) {
+      case "countdown":
+        if (d.value && d.value > 0) {
+          show($("countdown"), true);
+          var info = d.info || {};
+          var line = "";
+          if (info.mode) line += info.mode;
+          if (info.winLabel) line += (line ? " ・ " : "") + info.winLabel;
+          $("cd-info").textContent = line;
+          var teamEl = $("cd-team");
+          if (info.ffa) {
+            teamEl.textContent = "FFA";
+            teamEl.style.color = "#f59e0b";
+          } else if (info.team === 1) {
+            teamEl.textContent = "青チーム";
+            teamEl.style.color = "#3b82f6";
+          } else if (info.team === 2) {
+            teamEl.textContent = "赤チーム";
+            teamEl.style.color = "#ef4444";
+          } else {
+            teamEl.textContent = "";
+          }
+          $("cd-num").textContent = d.value;
+        } else { show($("countdown"), false); }
+        break;
+      case "preCountdown":
+        if (d.value && d.value > 0) {
+          show($("countdown"), true);
+          $("cd-info").textContent = "まもなく試合会場へ移動";
+          $("cd-team").textContent = "";
+          $("cd-num").textContent = d.value;
+        } else { show($("countdown"), false); }
+        break;
+      case "state":
+        renderState(d.data);
+        break;
+      case "spectate":
+        show($("spectate"), !!d.on);
+        break;
+      case "zone":
+        show($("zone"), !!d.on);
+        break;
+      case "result": {
+        show($("scorebar"), false);
+        show($("countdown"), false);
+        show($("spectate"), false);
+        var r = $("result");
+        r.className = "";
+        r.classList.add(d.outcome === "win" ? "win" : d.outcome === "loss" ? "loss" : "draw");
+        $("rs-big").textContent = d.outcome === "win" ? "WIN" : d.outcome === "loss" ? "LOSE" : "DRAW";
+        $("rs-jp").textContent = d.outcome === "win" ? "勝利" : d.outcome === "loss" ? "敗北" : "引き分け";
+        $("rs-stats").textContent = "キル " + (d.kills || 0) + " / デス " + (d.deaths || 0) +
+          "   獲得XP +" + (d.xpGained || 0) + (d.leveledUp ? ("  (Lv." + (d.level || 0) + " に昇格!)") : "");
+        if (d.pot && d.pot > 0) {
+          show($("rs-pot"), true);
+          $("rs-pot").textContent = "賞金 +$" + Number(d.pot).toLocaleString("ja-JP");
+        } else { show($("rs-pot"), false); }
+        $("rs-back").textContent = (d.duration || 5) + "秒後に元の場所へ戻ります...";
+        show(r, true);
+        if (resultTimer) clearTimeout(resultTimer);
+        resultTimer = setTimeout(function () { show(r, false); }, ((d.duration || 5) * 1000) + 800);
+        break;
+      }
+      case "clear":
+        clearAll();
+        break;
+    }
+  }
+
+  window.addEventListener("message", function (e) {
+    var d = e.data || {};
+    if (!d.action) return;
+    handle(d);
+  });
+})();
+</script>
+</body>
+</html>
